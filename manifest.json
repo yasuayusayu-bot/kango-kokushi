@@ -1,0 +1,31 @@
+{
+ "id": "./",
+ "name": "看護師国試 徹底マスター",
+ "short_name": "国試マスター",
+ "description": "看護師国家試験の学習アプリ",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "any",
+ "background_color": "#f4f6f5",
+ "theme_color": "#0f766e",
+ "lang": "ja",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}
