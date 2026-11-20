@@ -425,8 +425,11 @@ function lvStat(lv){ const qs=allQ().filter(x=>x.lv===lv); const m=qs.filter(x=>
 function curLevel(){ for(const lv of [1,2,3]){ if(lvStat(lv).pct<0.8) return lv; } return 3; }
 function suggestedWeak(){ return Object.keys(CATS).filter(k=>{const s=catStat(k); return s.n>=3&&s.rate<70;}); }
 function dueList(){ const now=Date.now(); return allQ().filter(x=>{const s=S.q[x.id]; return s&&s.n>0&&!mastered(x.id)&&s.d<=now;}).map(x=>x.id); }
-function wrongList(){ return allQ().filter(x=>{const s=S.q[x.id]; return s&&s.w>0&&!mastered(x.id);}).map(x=>x.id); }
-function weakPool(){ return allQ().filter(x=>S.weak.includes(x.cat)&&!mastered(x.id)).map(x=>x.id); }
+function ready(x){ if(mastered(x.id)) return false; const s=S.q[x.id]; return !s||!s.n||s.d<=Date.now(); }
+function nextDue(list){ const t=list.map(x=>S.q[x.id]).filter(s=>s&&s.n&&s.d>Date.now()).map(s=>s.d); return t.length?Math.min(...t):null; }
+function dueText(t){ if(!t) return ""; const d=Math.max(1,Math.ceil((t-Date.now())/DAY)); return d+"日後"; }
+function wrongList(){ return allQ().filter(x=>{const s=S.q[x.id]; return s&&s.w>0&&ready(x);}).map(x=>x.id); }
+function weakPool(){ return allQ().filter(x=>S.weak.includes(x.cat)&&ready(x)).map(x=>x.id); }
 function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
 function sameSet(a,b){ if(a.length!==b.length) return false; const s=new Set(a); return b.every(x=>s.has(x)); }
 // 事例(状況設定)はまとめて並べる
@@ -444,6 +447,14 @@ let view="home", Q=null, timerH=null;
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function setTab(v){ view=v; document.querySelectorAll("#tabbar button").forEach(b=>b.classList.toggle("on",b.dataset.v===v)); render(); window.scrollTo(0,0); }
 document.querySelectorAll("#tabbar button").forEach(b=>b.onclick=()=>{ stopTimer(); stopSpeak(); Q=null; setTab(b.dataset.v); });
+function catQuiz(k){
+  const p=allQ().filter(x=>x.cat===k);
+  const unseen=p.filter(x=>!S.q[x.id]||!S.q[x.id].n), rev=p.filter(x=>S.q[x.id]&&S.q[x.id].n&&ready(x)).sort((a,b)=>(S.q[b.id].w-S.q[b.id].c)-(S.q[a.id].w-S.q[a.id].c));
+  const ids=shuffle(unseen).sort((a,b)=>a.lv-b.lv).concat(rev).slice(0,10).map(x=>x.id);
+  if(ids.length) return startQuiz(groupCases(ids),CATS[k],{});
+  const t=nextDue(p);
+  confirmBox(`「${CATS[k]}」の${p.length}問は、今日解く分が終わっています。<br>正解した問題は、忘れかけた頃${t?"（"+dueText(t)+"）":""}にまた出題します。<br><small>それでも全部もう一度解きますか？</small>`,()=>startQuiz(groupCases(shuffle(p).slice(0,10).map(x=>x.id)),CATS[k]+"（全問）",{}),"もう一度解く");
+}
 function bind(id,fn){ const el=document.getElementById(id); if(el) el.onclick=fn; }
 function render(){ if(Q) return renderQuiz(); ({home:renderHome,kako:renderKako,weak:renderWeak,ai:renderAI,log:renderLog})[view](); }
 function tagPills(x){
@@ -537,16 +548,16 @@ function renderHome(){
   <div class="card">${Object.keys(CATS).map(k=>{const s=catStat(k);const r=s.rate;const cl=r===null?"":r<60?"low":r<80?"mid":"";
     return `<div class="catrow"><div class="nm">${CATS[k]}<small>${r===null?"未解答":"正答率"+r+"%"}・マスター ${s.m}/${s.total}</small><div class="bar"><i class="${cl}" style="width:${s.total?s.m/s.total*100:0}%"></i></div></div><button class="go" data-c="${k}">解く</button></div>`;}).join("")}</div>`;
   bindInstall();
-  bind("bStep",()=>{ const l=curLevel(); let p=all.filter(x=>x.lv===l&&!mastered(x.id));
+  bind("bStep",()=>{ const l=curLevel(); let p=all.filter(x=>x.lv===l&&ready(x));
     const w=p.filter(x=>S.weak.includes(x.cat)); p=shuffle(w).concat(shuffle(p.filter(x=>!S.weak.includes(x.cat))));
-    if(!p.length) return info("すべての段階をマスターしました！"); startQuiz(groupCases(p.slice(0,10).map(x=>x.id)),"ステップ学習："+LV[l],{drill:true}); });
-  bind("bWeak",()=>{ if(!S.weak.length) return setTab("weak"); const p=weakPool(); if(!p.length) return info("設定した苦手分野はすべてマスター済みです！"); startQuiz(groupCases(shuffle(p).slice(0,8)),"苦手克服",{drill:true}); });
+    if(!p.length){ const t=nextDue(all.filter(x=>x.lv===l)); return info(t?`「${LV[l]}」の今日の分は終わりです！<br>正解した問題は、忘れかけた頃（${dueText(t)}）にまた出題します。`:"すべての段階をマスターしました！"); } startQuiz(groupCases(p.slice(0,10).map(x=>x.id)),"ステップ学習："+LV[l],{drill:true}); });
+  bind("bWeak",()=>{ if(!S.weak.length) return setTab("weak"); const p=weakPool(); if(!p.length) return info("苦手分野の今日の分は終わりです！正解した問題は日を空けてまた出題します。"); startQuiz(groupCases(shuffle(p).slice(0,8)),"苦手克服",{drill:true}); });
   bind("bWrong",()=>{ const d=wrongList(); if(!d.length) return info("間違えた問題はまだありません。"); startQuiz(groupCases(shuffle(d).slice(0,10)),"間違えた問題",{drill:true}); });
   bind("bDue",()=>{ const d=dueList(); if(!d.length) return info("今日復習する問題はありません。"); startQuiz(groupCases(shuffle(d).slice(0,15)),"今日の復習",{}); });
   bind("bMock",startMock);
   bind("bKR",()=>setTab("kako"));
   bind("bHissu",()=>{ const p=hs.filter(x=>!mastered(x.id)); if(!p.length) return info("必修問題はすべてマスター済みです！"); startQuiz(shuffle(p).slice(0,15).map(x=>x.id),"必修集中",{drill:true}); });
-  app.querySelectorAll(".go").forEach(b=>b.onclick=()=>{const k=b.dataset.c; const p=all.filter(x=>x.cat===k).sort((a,b)=>a.lv-b.lv); startQuiz(groupCases(shuffle(p.filter(x=>!mastered(x.id))).concat(shuffle(p.filter(x=>mastered(x.id)))).slice(0,10).map(x=>x.id)),CATS[k],{});});
+  app.querySelectorAll(".go").forEach(b=>b.onclick=()=>catQuiz(b.dataset.c));
 }
 
 /* ---- 過去問タブ（看護roo!連動＋厚労省） ---- */
@@ -628,9 +639,9 @@ async function drillSub(id){
   const x=KR.find(k=>k.id===id), rt=krRate(id);
   const have=(S.gen||[]).filter(g=>g.sub===id&&!mastered(g.id)).map(g=>g.id);
   if(have.length>=5) return startQuiz(shuffle(have).slice(0,10),"特訓："+x.name,{drill:true});
-  if(NOAI){ const p=allQ().filter(q=>q.cat===x.cat&&!mastered(q.id)).sort((a,b)=>a.lv-b.lv||Math.random()-.5);
+  if(NOAI){ const p=allQ().filter(q=>q.cat===x.cat&&ready(q)).sort((a,b)=>a.lv-b.lv||Math.random()-.5);
     const pool=(x.hissu?p.filter(q=>q.h):p); const use=(pool.length?pool:p);
-    if(!use.length) return info(`「${CATS[x.cat]}」の収録問題はすべてマスター済みです！`);
+    if(!use.length) return info(`「${CATS[x.cat]}」の今日の特訓は終わりです！正解した問題は日を空けてまた出題します。`);
     return startQuiz(groupCases(use.slice(0,10).map(q=>q.id)),"特訓："+CATS[x.cat],{drill:true}); }
   const lv=rt===null?1:rt<0.5?1:rt<0.8?2:3;   // 弱いほど基礎から
   drillBusy=true;
@@ -827,13 +838,13 @@ function renderQuiz(){
   const id=Q.queue[Q.pos], item=byId(id); if(!item){ Q.pos++; return renderQuiz(); }
   if(!Q.order) Q.order=item.type==="kako"?item.c.map((_,i)=>i):shuffle(item.c.map((_,i)=>i)); // 過去問は原文の順
   const multi=item.a.length>1;
-  const remainUniq=Q.drill?[...Q.uniq].filter(x=>!mastered(x)).length:Q.queue.length-Q.pos;
-  const pct=Q.drill?(1-remainUniq/Q.uniq.size)*100:Q.pos/Q.queue.length*100;
+  const remainUniq=Q.drill?Math.max(0,Q.queue.length-Q.pos):Q.queue.length-Q.pos;
+  const pct=Q.pos/Q.queue.length*100;
   app.innerHTML=`
   <div class="qhead">${tagPills(item)}<span>${CATS[item.cat]||""}</span>
   ${Q.exam?`<span class="timer" id="tm">${fmt(Math.max(0,Q.limit-(Date.now()-Q.start)))}</span>`:""}<button class="x" id="quit">終了 ✕</button></div>
   <div class="prog"><i style="width:${pct}%"></i></div>
-  <div class="note" style="margin-top:-6px;margin-bottom:6px">${esc(Q.title)}・${Q.drill?`未マスター残り ${remainUniq}問`:`${Q.pos+1} / ${Q.queue.length}問`}</div>
+  <div class="note" style="margin-top:-6px;margin-bottom:6px">${esc(Q.title)}・${Q.pos+1} / ${Q.queue.length}問</div>
   ${item.ct?`<div class="case"><b>状況設定</b>${esc(item.ct)}</div>`:""}
   <div class="qtext">${esc(item.q)}${multi&&!/選べ/.test(item.q)?`（${item.a.length}つ選べ）`:""}</div>
   ${item.fig?`<p class="note" style="margin-top:-8px;margin-bottom:10px">※この問題は図・写真を使います。<a class="lnk" href="${(KAKO_EXAMS.find(e=>e.n===item.exam)||{}).url||"#"}" target="_blank" rel="noopener">厚労省の別冊PDF↗</a></p>`:""}
@@ -861,7 +872,7 @@ function submit(item,chosen){
   const ok=sameSet(chosen,item.a);
   if(Q.exam) Q.ans[item.id]={chosen,ok};
   const s=record(item,ok); Q.log.push({id:item.id,ok});
-  if(Q.drill&&!Q.exam&&s.s<MASTER){ const gap=ok?5:3; Q.queue.splice(Math.min(Q.pos+1+gap,Q.queue.length),0,item.id); }
+  if(Q.drill&&!Q.exam&&!ok){ Q.queue.splice(Math.min(Q.pos+4,Q.queue.length),0,item.id); }   // 間違えた問題だけ3問後にもう一度
   save();
   app.querySelectorAll(".ch").forEach(b=>{ b.disabled=true; const bi=+b.dataset.i; b.classList.remove("sel"); if(item.a.includes(bi)) b.classList.add("ok"); else if(chosen.includes(bi)) b.classList.add("ng"); });
   const dc=document.getElementById("decide"); if(dc) dc.remove();
@@ -874,7 +885,7 @@ function submit(item,chosen){
   ${figHTML(item.d)}
   ${!ok?`<div id="aifig">${fx?fxHTML(item,fx):""}</div>`:""}
   ${item.p?`<div class="point"><b>覚えるポイント</b>${esc(item.p)}</div>`:""}
-  <div class="streak">${[0,1,2].map(k=>`<i class="${k<s.s?"on":""}"></i>`).join("")}<span>${left?`マスターまであと${left}回連続正解${Q.drill?"（このあともう一度出ます）":""}`:"マスター！"}</span></div>
+  <div class="streak">${[0,1,2].map(k=>`<i class="${k<s.s?"on":""}"></i>`).join("")}<span>${!left?"マスター！":ok?`次は${IVL[s.b]}日後に出題（マスターまであと${left}回）`:Q.drill?"3問後にもう一度出ます":"明日以降にもう一度出題します"}</span></div>
   <div id="aiOut" class="ai-out" style="display:none"></div></div>
   <div class="actions"><button class="act sub" id="spk">🔊 音声で解説</button>${!NOAI&&!ok&&!fx?`<button class="act sub" id="figb">AIで図解</button>`:""}${NOAI?"":`<button class="act sub" id="deep">AIに質問</button>`}<button class="act" id="next">次へ</button></div>`;
   bind("next",()=>{ stopSpeak(); Q.pos++; Q.answered=false; Q.order=null; renderQuiz(); window.scrollTo(0,0); });
